@@ -362,6 +362,8 @@ fn create_insecure_http_client() -> Result<HttpClient, String> {
         let _ = errors.Append(ChainValidationResult::InvalidSignature);
         let _ = errors.Append(ChainValidationResult::WrongUsage);
         let _ = errors.Append(ChainValidationResult::RevocationFailure);
+        let _ = errors.Append(ChainValidationResult::BasicConstraintsError);
+        let _ = errors.Append(ChainValidationResult::UnknownCriticalExtension);
     }
     HttpClient::Create(&filter).map_err(|e| format!("HttpClient: {e}"))
 }

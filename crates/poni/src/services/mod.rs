@@ -177,15 +177,15 @@ impl Services {
         }
     }
 
-    pub fn set_volume(&self, level: f32, app_id: Option<String>) {
+    pub fn set_volume(&self, level: f32, app_id: Option<String>, app_name: Option<String>) {
         if let Some(a) = &self._audio {
-            a.set_volume(level, app_id);
+            a.set_volume(level, app_id, app_name);
         }
     }
 
-    pub fn toggle_mute(&self, app_id: Option<String>) {
+    pub fn toggle_mute(&self, app_id: Option<String>, app_name: Option<String>) {
         if let Some(a) = &self._audio {
-            a.toggle_mute(app_id);
+            a.toggle_mute(app_id, app_name);
         }
     }
 

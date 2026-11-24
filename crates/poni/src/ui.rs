@@ -91,8 +91,8 @@ pub struct Input {
     pub focused: Option<WidgetId>,
     /// Caret position (chars) inside the focused field.
     pub caret: usize,
-    /// True when all text in the focused field is selected (Ctrl+A).
-    pub select_all: bool,
+    /// Selection anchor (char index) when selecting text with mouse or Ctrl+A.
+    pub sel_anchor: Option<usize>,
 }
 
 impl Input {
@@ -380,34 +380,62 @@ impl<'a, 'g> Ui<'a, 'g> {
     fn text_input_styled(&mut self, id: WidgetId, r: Rect, buf: &mut String, placeholder: &str, max_chars: usize, look: InputLook) -> TextInputResp {
         let resp = self.interact(id, r, CursorKind::Text);
         let mut out = TextInputResp::default();
-        if resp.clicked {
-            self.input.select_all = false;
-            if self.input.focused != Some(id) {
+        let st = TextStyle::new(crate::gfx::ts::BODY);
+        let inner = match look {
+            InputLook::Box => r.inset(10.0, 0.0),
+            InputLook::Row { .. } => Rect::new(r.x + 36.0, r.y, (r.w - 46.0).max(0.0), r.h),
+        };
+
+        // Posizionamento cursore e selezione trascinando col mouse
+        if resp.pressed {
+            let idx = self.input.mouse.map(|m| char_index_at_x(self.c, buf, &st, m.x - inner.x)).unwrap_or_else(|| buf.chars().count());
+            if self.input.just_pressed || self.input.focused != Some(id) {
                 self.input.focused = Some(id);
-                self.input.caret = buf.chars().count();
+                self.input.caret = idx;
+                self.input.sel_anchor = Some(idx);
                 self.wants_focus = Some(true);
+            } else {
+                self.input.caret = idx;
             }
+            self.repaint = true;
+        } else if resp.clicked && self.input.focused != Some(id) {
+            self.input.focused = Some(id);
+            self.input.caret = buf.chars().count();
+            self.input.sel_anchor = None;
+            self.wants_focus = Some(true);
         }
+
         let focused = self.input.focused == Some(id);
         out.focused = focused;
         if focused {
             let keys = std::mem::take(&mut self.input.keys);
             let mut chars: Vec<char> = buf.chars().collect();
             let mut caret = self.input.caret.min(chars.len());
-            let mut sel = self.input.select_all;
+            let mut anchor = self.input.sel_anchor.map(|a| a.min(chars.len()));
             let mut nav = false;
+            let delete_sel = |chars: &mut Vec<char>, caret: &mut usize, anchor: &mut Option<usize>| -> bool {
+                if let Some(a) = anchor.take() {
+                    if a != *caret {
+                        let (lo, hi) = (a.min(*caret), a.max(*caret));
+                        chars.drain(lo..hi);
+                        *caret = lo;
+                        return true;
+                    }
+                }
+                false
+            };
             for k in keys {
                 match k {
                     KeyInput::SelectAll => {
-                        sel = !chars.is_empty();
-                        caret = chars.len();
-                        nav = true;
+                        if !chars.is_empty() {
+                            anchor = Some(0);
+                            caret = chars.len();
+                            nav = true;
+                        }
                     }
                     KeyInput::Char(c) if !c.is_control() => {
-                        if sel {
-                            chars.clear();
-                            caret = 0;
-                            sel = false;
+                        if delete_sel(&mut chars, &mut caret, &mut anchor) {
+                            out.changed = true;
                         }
                         if chars.len() < max_chars {
                             chars.insert(caret, c);
@@ -416,10 +444,7 @@ impl<'a, 'g> Ui<'a, 'g> {
                         }
                     }
                     KeyInput::Backspace => {
-                        if sel {
-                            chars.clear();
-                            caret = 0;
-                            sel = false;
+                        if delete_sel(&mut chars, &mut caret, &mut anchor) {
                             out.changed = true;
                         } else if caret > 0 {
                             caret -= 1;
@@ -428,10 +453,7 @@ impl<'a, 'g> Ui<'a, 'g> {
                         }
                     }
                     KeyInput::BackspaceWord => {
-                        if sel {
-                            chars.clear();
-                            caret = 0;
-                            sel = false;
+                        if delete_sel(&mut chars, &mut caret, &mut anchor) {
                             out.changed = true;
                         } else if caret > 0 {
                             let end = caret;
@@ -446,10 +468,7 @@ impl<'a, 'g> Ui<'a, 'g> {
                         }
                     }
                     KeyInput::Delete => {
-                        if sel {
-                            chars.clear();
-                            caret = 0;
-                            sel = false;
+                        if delete_sel(&mut chars, &mut caret, &mut anchor) {
                             out.changed = true;
                         } else if caret < chars.len() {
                             chars.remove(caret);
@@ -457,10 +476,7 @@ impl<'a, 'g> Ui<'a, 'g> {
                         }
                     }
                     KeyInput::DeleteWord => {
-                        if sel {
-                            chars.clear();
-                            caret = 0;
-                            sel = false;
+                        if delete_sel(&mut chars, &mut caret, &mut anchor) {
                             out.changed = true;
                         } else if caret < chars.len() {
                             let start = caret;
@@ -476,51 +492,57 @@ impl<'a, 'g> Ui<'a, 'g> {
                         }
                     }
                     KeyInput::Left => {
-                        caret = caret.saturating_sub(1);
-                        sel = false;
+                        if let Some(a) = anchor.take().filter(|&a| a != caret) {
+                            caret = a.min(caret);
+                        } else {
+                            caret = caret.saturating_sub(1);
+                        }
                         nav = true;
                     }
                     KeyInput::WordLeft => {
+                        anchor = None;
                         while caret > 0 && chars[caret - 1].is_whitespace() {
                             caret -= 1;
                         }
                         while caret > 0 && !chars[caret - 1].is_whitespace() {
                             caret -= 1;
                         }
-                        sel = false;
                         nav = true;
                     }
                     KeyInput::Right => {
-                        caret = (caret + 1).min(chars.len());
-                        sel = false;
+                        if let Some(a) = anchor.take().filter(|&a| a != caret) {
+                            caret = a.max(caret);
+                        } else {
+                            caret = (caret + 1).min(chars.len());
+                        }
                         nav = true;
                     }
                     KeyInput::WordRight => {
+                        anchor = None;
                         while caret < chars.len() && !chars[caret].is_whitespace() {
                             caret += 1;
                         }
                         while caret < chars.len() && chars[caret].is_whitespace() {
                             caret += 1;
                         }
-                        sel = false;
                         nav = true;
                     }
                     KeyInput::Home => {
                         caret = 0;
-                        sel = false;
+                        anchor = None;
                         nav = true;
                     }
                     KeyInput::End => {
                         caret = chars.len();
-                        sel = false;
+                        anchor = None;
                         nav = true;
                     }
                     KeyInput::Enter => {
-                        sel = false;
+                        anchor = None;
                         out.submitted = true;
                     }
                     KeyInput::Escape => {
-                        sel = false;
+                        anchor = None;
                         out.cancelled = true;
                     }
                     _ => {}
@@ -528,7 +550,7 @@ impl<'a, 'g> Ui<'a, 'g> {
             }
             *buf = chars.into_iter().collect();
             self.input.caret = caret;
-            self.input.select_all = sel;
+            self.input.sel_anchor = anchor;
             if out.cancelled {
                 self.input.focused = None;
                 self.wants_focus = Some(false);
@@ -538,14 +560,13 @@ impl<'a, 'g> Ui<'a, 'g> {
             }
         }
         // Draw.
-        let inner = match look {
+        match look {
             InputLook::Box => {
                 let bg = if focused { Color::white(0.13) } else if resp.hovered { Color::white(0.1) } else { palette::SURFACE };
                 self.c.fill_rrect(r, 9.0, bg);
                 if focused {
                     self.c.stroke_rrect(r, 9.0, Color::white(0.28), 1.0);
                 }
-                r.inset(10.0, 0.0)
             }
             InputLook::Row { accent, icon } => {
                 if focused || resp.hovered {
@@ -558,17 +579,21 @@ impl<'a, 'g> Ui<'a, 'g> {
                     let col = if buf.is_empty() { palette::TEXT_FAINT } else { accent };
                     self.c.icon(i, Rect::from_center(Point::new(r.x + 18.0, r.center().y), 16.0, 16.0), col);
                 }
-                Rect::new(r.x + 36.0, r.y, (r.w - 46.0).max(0.0), r.h)
             }
-        };
-        let st = TextStyle::new(crate::gfx::ts::BODY);
+        }
         if buf.is_empty() {
             self.c.text(placeholder, inner, &st.color(palette::TEXT_FAINT));
         } else {
-            if focused && self.input.select_all {
-                let (tw, _) = self.c.measure(buf, &st, inner.w);
-                let sel_r = Rect::new(inner.x - 2.0, r.center().y - 9.0, (tw + 4.0).min(inner.w + 2.0), 18.0);
-                self.c.fill_rrect(sel_r, 4.0, palette::BLUE.with_alpha(0.38));
+            if focused {
+                if let Some(a) = self.input.sel_anchor.filter(|&a| a != self.input.caret) {
+                    let (lo, hi) = (a.min(self.input.caret), a.max(self.input.caret));
+                    let s_lo: String = buf.chars().take(lo).collect();
+                    let s_hi: String = buf.chars().take(hi).collect();
+                    let x0 = if s_lo.is_empty() { 0.0 } else { self.c.measure(&s_lo, &st, 10_000.0).0 };
+                    let x1 = if s_hi.is_empty() { 0.0 } else { self.c.measure(&s_hi, &st, 10_000.0).0 };
+                    let sel_r = Rect::new(inner.x + x0, r.center().y - 9.0, (x1 - x0).max(2.0).min((inner.w - x0).max(0.0)), 18.0);
+                    self.c.fill_rrect(sel_r, 4.0, palette::BLUE.with_alpha(0.38));
+                }
             }
             self.c.text(buf, inner, &st);
         }
@@ -623,4 +648,25 @@ impl<'a, 'g> Ui<'a, 'g> {
             self.wants_focus = Some(false);
         }
     }
+}
+
+fn char_index_at_x(c: &mut Canvas, buf: &str, st: &TextStyle, rel_x: f32) -> usize {
+    if rel_x <= 0.0 || buf.is_empty() {
+        return 0;
+    }
+    let mut best_idx = 0;
+    let mut best_dist = rel_x;
+    let mut prefix = String::new();
+    for (i, ch) in buf.chars().enumerate() {
+        prefix.push(ch);
+        let w = c.measure(&prefix, st, 10_000.0).0;
+        let d = (w - rel_x).abs();
+        if d <= best_dist {
+            best_dist = d;
+            best_idx = i + 1;
+        } else {
+            break;
+        }
+    }
+    best_idx
 }

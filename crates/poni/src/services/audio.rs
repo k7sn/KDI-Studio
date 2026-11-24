@@ -39,12 +39,12 @@ pub struct AudioService {
 }
 
 impl AudioService {
-    pub fn set_volume(&self, level: f32, app_id: Option<String>) {
-        let _ = self.tx.send(Msg::SetVolume(level.clamp(0.0, 1.0), app_id));
+    pub fn set_volume(&self, level: f32, app_id: Option<String>, app_name: Option<String>) {
+        let _ = self.tx.send(Msg::SetVolume(level.clamp(0.0, 1.0), app_id, app_name));
     }
 
-    pub fn toggle_mute(&self, app_id: Option<String>) {
-        let _ = self.tx.send(Msg::ToggleMute(app_id));
+    pub fn toggle_mute(&self, app_id: Option<String>, app_name: Option<String>) {
+        let _ = self.tx.send(Msg::ToggleMute(app_id, app_name));
     }
 
     pub fn start(sink: EventSink) -> Result<Self> {
@@ -79,8 +79,8 @@ impl Drop for AudioService {
 enum Msg {
     /// The default render endpoint (console or multimedia role) changed.
     DefaultChanged,
-    SetVolume(f32, Option<String>),
-    ToggleMute(Option<String>),
+    SetVolume(f32, Option<String>, Option<String>),
+    ToggleMute(Option<String>, Option<String>),
     Shutdown,
 }
 
@@ -259,9 +259,16 @@ fn worker(sink: EventSink, rx: Receiver<Msg>, client_tx: Sender<Msg>) {
     while let Ok(msg) = rx.recv() {
         match msg {
             Msg::Shutdown => break,
-            Msg::SetVolume(level, app_id) => {
+            Msg::SetVolume(level, app_id, app_name) => {
                 if let Some(b) = &binding {
-                    let per_app = app_id.as_deref().is_some_and(|id| set_app_volume(&b.device, id, level));
+                    let has_media = app_id.is_some() || app_name.is_some();
+                    let per_app = has_media
+                        && set_app_volume(
+                            &b.device,
+                            app_id.as_deref().unwrap_or(""),
+                            app_name.as_deref().unwrap_or(""),
+                            level,
+                        );
                     if !per_app {
                         unsafe {
                             let _ = b.volume.SetMasterVolumeLevelScalar(level, std::ptr::null());
@@ -272,9 +279,15 @@ fn worker(sink: EventSink, rx: Receiver<Msg>, client_tx: Sender<Msg>) {
                     }
                 }
             }
-            Msg::ToggleMute(app_id) => {
+            Msg::ToggleMute(app_id, app_name) => {
                 if let Some(b) = &binding {
-                    let per_app = app_id.as_deref().is_some_and(|id| toggle_app_mute(&b.device, id));
+                    let has_media = app_id.is_some() || app_name.is_some();
+                    let per_app = has_media
+                        && toggle_app_mute(
+                            &b.device,
+                            app_id.as_deref().unwrap_or(""),
+                            app_name.as_deref().unwrap_or(""),
+                        );
                     if !per_app {
                         unsafe {
                             if let Ok(m) = b.volume.GetMute() {
@@ -390,18 +403,24 @@ fn process_exe_name(pid: u32) -> Option<String> {
     }
 }
 
-fn matches_app_id(exe_lower: &str, app_id: &str) -> bool {
-    let target = app_id.to_ascii_lowercase();
-    let stem = exe_lower.strip_suffix(".exe").unwrap_or(exe_lower);
-    if stem.is_empty() {
-        return false;
-    }
-    target == exe_lower || target == stem || target.contains(exe_lower) || target.contains(stem)
+fn norm_alnum(s: &str) -> String {
+    s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
 }
 
-fn for_app_sessions(device: &IMMDevice, app_id: &str, mut f: impl FnMut(&ISimpleAudioVolume)) -> bool {
+fn matches_media_app(exe_lower: &str, app_id: &str, app_name: &str) -> bool {
+    let stem = exe_lower.strip_suffix(".exe").unwrap_or(exe_lower);
+    let stem_n = norm_alnum(stem);
+    if stem_n.len() < 2 {
+        return false;
+    }
+    let id_n = norm_alnum(app_id);
+    let name_n = norm_alnum(app_name);
+    let hit = |cand: &str| !cand.is_empty() && (cand == stem_n || cand.contains(&stem_n) || stem_n.contains(cand));
+    hit(&id_n) || hit(&name_n)
+}
+
+fn for_app_sessions(device: &IMMDevice, app_id: &str, app_name: &str, mut f: impl FnMut(&ISimpleAudioVolume)) -> bool {
     let mut matched = false;
-    let mut active_vols: Vec<ISimpleAudioVolume> = Vec::new();
     unsafe {
         let Ok(mgr) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { return false };
         let Ok(enumerator) = mgr.GetSessionEnumerator() else { return false };
@@ -413,42 +432,30 @@ fn for_app_sessions(device: &IMMDevice, app_id: &str, mut f: impl FnMut(&ISimple
             if pid == 0 {
                 continue;
             }
-            let is_active = ctrl.GetState().map(|s| s == AudioSessionStateActive).unwrap_or(false);
-            if let Ok(vol) = ctrl.cast::<ISimpleAudioVolume>() {
-                if let Some(exe) = process_exe_name(pid) {
-                    if matches_app_id(&exe, app_id) {
+            if let Some(exe) = process_exe_name(pid) {
+                if matches_media_app(&exe, app_id, app_name) {
+                    if let Ok(vol) = ctrl.cast::<ISimpleAudioVolume>() {
                         f(&vol);
                         matched = true;
-                        continue;
                     }
-                }
-                if is_active {
-                    active_vols.push(vol);
                 }
             }
         }
     }
-    // Se l'app_id (es. PWA YouTube Music / browser) non coincide col nome .exe,
-    // controlla dinamicamente tutte le sessioni audio attualmente in riproduzione!
-    if !matched && !active_vols.is_empty() {
-        for vol in &active_vols {
-            f(vol);
-        }
-        matched = true;
-    }
+    let _ = AudioSessionStateActive;
     matched
 }
 
-fn set_app_volume(device: &IMMDevice, app_id: &str, level: f32) -> bool {
-    for_app_sessions(device, app_id, |vol| unsafe {
+fn set_app_volume(device: &IMMDevice, app_id: &str, app_name: &str, level: f32) -> bool {
+    for_app_sessions(device, app_id, app_name, |vol| unsafe {
         let _ = vol.SetMasterVolume(level, std::ptr::null());
         let _ = vol.SetMute(false, std::ptr::null());
     })
 }
 
-fn toggle_app_mute(device: &IMMDevice, app_id: &str) -> bool {
+fn toggle_app_mute(device: &IMMDevice, app_id: &str, app_name: &str) -> bool {
     let mut toggled = None;
-    for_app_sessions(device, app_id, |vol| unsafe {
+    for_app_sessions(device, app_id, app_name, |vol| unsafe {
         let next = *toggled.get_or_insert_with(|| !vol.GetMute().map(|m| m.as_bool()).unwrap_or(false));
         let _ = vol.SetMute(next, std::ptr::null());
     })

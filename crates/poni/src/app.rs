@@ -4869,8 +4869,9 @@ impl App {
             match c {
                 Command::SetVolume(v) => {
                     let app_id = self.st.media.as_ref().map(|m| m.app_id.clone());
+                    let app_name = self.st.media.as_ref().map(|m| m.app_name.clone());
                     if let Some(s) = self.services.as_ref() {
-                        s.set_volume(v, app_id);
+                        s.set_volume(v, app_id, app_name);
                     }
                     self.st.volume.level = v.clamp(0.0, 1.0);
                     self.st.volume.muted = false;
@@ -4878,8 +4879,9 @@ impl App {
                 }
                 Command::ToggleMute => {
                     let app_id = self.st.media.as_ref().map(|m| m.app_id.clone());
+                    let app_name = self.st.media.as_ref().map(|m| m.app_name.clone());
                     if let Some(s) = self.services.as_ref() {
-                        s.toggle_mute(app_id);
+                        s.toggle_mute(app_id, app_name);
                     }
                 }
                 Command::Gemini(gcmd) => {
