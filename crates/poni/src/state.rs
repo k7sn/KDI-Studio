@@ -305,6 +305,8 @@ pub struct PhoneDrop {
     pub transfer: Option<PhoneTransfer>,
     /// The last result, whether it's good news, and until when it shows.
     pub outcome: Option<(String, bool, f64)>,
+    /// Animazione pulsante "Inviato!" per gli appunti.
+    pub clip_sent_until: f64,
 }
 
 impl PhoneDrop {

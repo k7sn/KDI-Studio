@@ -11,8 +11,7 @@
 //! sends files to the Shelf after a yes on the island, and can save Shelf
 //! files (`services::phonedrop`, `poni_core::phonedrop`).
 
-use crate::commands::{Command, LocalSendCmd, PairCmd, PhoneCmd};
-use crate::services::localsend::LocalSendDevice;
+use crate::commands::{Command, PairCmd, PhoneCmd};
 use crate::dragdrop;
 use crate::gfx::{Image, ImageData, TextStyle, Weight};
 use crate::icons::Icon;
@@ -60,7 +59,7 @@ const QR_MARGIN: f32 = 6.0;
 const PHONE_TILE_W: f32 = 196.0;
 /// Pairing (`services::pairdrop`) is built only in the Windows app so far;
 /// elsewhere the phone panel has Done alone.
-const PAIRING: bool = cfg!(windows);
+const PAIRING: bool = false;
 /// What the phone panel calls this computer.
 const THIS_COMPUTER: &str = if cfg!(windows) { "this PC" } else { "this Mac" };
 /// What to allow if the system asks about Phone drop's incoming connections.
@@ -69,7 +68,7 @@ const ALLOW_HINT: &str = if cfg!(windows) { "If Windows asks, allow KDI Studio o
 pub const PHONE_OUTCOME_S: f64 = 8.0;
 
 pub fn height(st: &AppState) -> f32 {
-    if st.phone.is_some() || st.localsend.open {
+    if st.phone.is_some() {
         PAGE_H + PHONE_GAP + PHONE_H
     } else {
         PAGE_H
@@ -108,9 +107,7 @@ thread_local! {
 }
 
 enum Action {
-    LocalSendToggle,
-    LocalSendRefresh,
-    LocalSendSend(LocalSendDevice),
+    PhoneSendClip,
     PhoneOpen,
     PhoneClose,
     PhoneAnswer(u64, bool),
@@ -162,24 +159,17 @@ fn draw_page(ui: &mut Ui, st: &mut AppState, area: Rect, l: &mut Local) {
     let mut actions = Vec::new();
     // Pill: the boxes that reach the card's bottom corners follow them.
     let card = super::card::pill_card(st, area);
-    // With Phone drop or LocalSend open the shelf keeps its height and the panel sits below.
-    let has_panel = st.phone.is_some() || st.localsend.open;
-    let (main, panel_r) = if has_panel {
-        (Rect::new(area.x, area.y, area.w, PAGE_H), Some(Rect::new(area.x, area.y + PAGE_H + PHONE_GAP, area.w, PHONE_H)))
-    } else {
-        (area, None)
+    let (main, phone_r) = match &st.phone {
+        Some(_) => (Rect::new(area.x, area.y, area.w, PAGE_H), Some(Rect::new(area.x, area.y + PAGE_H + PHONE_GAP, area.w, PHONE_H))),
+        None => (area, None),
     };
     if items.is_empty() {
         draw_empty(ui, st, l, main, card, &mut actions);
     } else {
         draw_items(ui, st, l, main, &items, dt, shown, card, &mut actions);
     }
-    if let Some(r) = panel_r {
-        if let Some(pd) = st.phone.clone() {
-            draw_phone(ui, st, l, &pd, r, card, &mut actions);
-        } else if st.localsend.open {
-            draw_localsend_panel(ui, st, &items, r, card, &mut actions);
-        }
+    if let (Some(r), Some(pd)) = (phone_r, st.phone.clone()) {
+        draw_phone(ui, st, l, &pd, r, card, &mut actions);
     }
     apply(st, l, &items, actions);
 }
@@ -267,20 +257,7 @@ fn apply(st: &mut AppState, l: &mut Local, items: &[ShelfItem], actions: Vec<Act
     let now = st.now;
     for a in actions {
         match a {
-            Action::LocalSendToggle => {
-                st.localsend.open = !st.localsend.open;
-                if st.localsend.open {
-                    st.phone = None;
-                    st.cmd(Command::LocalSend(LocalSendCmd::Discover));
-                }
-            }
-            Action::LocalSendRefresh => {
-                st.cmd(Command::LocalSend(LocalSendCmd::Discover));
-            }
-            Action::LocalSendSend(dev) => {
-                let paths: Vec<String> = items.iter().map(|i| i.path.clone()).collect();
-                st.cmd(Command::LocalSend(LocalSendCmd::Send { device: dev, paths }));
-            }
+            Action::PhoneSendClip => st.cmd(Command::Phone(PhoneCmd::SendClipboard)),
             Action::PhoneOpen => st.cmd(Command::Phone(PhoneCmd::Open)),
             Action::PhoneClose => st.cmd(Command::Phone(PhoneCmd::Close)),
             Action::PhoneAnswer(id, accept) => st.cmd(Command::Phone(PhoneCmd::Answer { id, accept })),
@@ -508,17 +485,15 @@ fn draw_header(ui: &mut Ui, st: &AppState, l: &Local, head: Rect, items: &[Shelf
         }
         right = undo_r.x;
     }
-    // Pulsante rapido per inviare direttamente con LocalSend
-    let ls_label = if st.localsend.open { "Chiudi LocalSend" } else { "Invia (LocalSend)" };
-    let ls_w = ui.pill_width(ls_label, true, true);
-    let ls_r = Rect::new(right - PILL_GAP - ls_w, head.y, ls_w, PILL_SMALL);
-    let ls_style = if st.localsend.open { PillStyle::Primary(st.accent) } else { PillStyle::UtilityAccent(st.accent) };
-    if ui.pill(wid("shelf.localsend"), ls_r, ls_label, Some(Icon::Phone), ls_style).clicked {
-        actions.push(Action::LocalSendToggle);
+    // Invia al telefono via Wi-Fi locale (QR code)
+    if st.phone.is_none() {
+        let phone_w = ui.pill_width("Invia al telefono", true, true);
+        let phone_r = Rect::new(right - PILL_GAP - phone_w, head.y, phone_w, PILL_SMALL);
+        if ui.pill(wid("shelf.phone"), phone_r, "Invia al telefono", Some(Icon::Phone), PillStyle::UtilityAccent(st.accent)).clicked {
+            actions.push(Action::PhoneOpen);
+        }
+        right = phone_r.x;
     }
-    right = ls_r.x;
-
-    // Phone drop rimosso: KDI Studio usa esclusivamente LocalSend nativo.
 
     // No instructions by default: the row only describes the hovered tile
     // (where it lives) or a full shelf.
@@ -590,11 +565,10 @@ fn draw_empty(ui: &mut Ui, st: &AppState, l: &Local, area: Rect, card: Option<(R
     let accent = st.accent;
     // Same bottom edge as the drop overlay over a filled shelf.
     let full = Rect::new(area.x, area.y + TOP, area.w, (area.h - TOP - 4.0).max(0.0));
-    // Tile dedicato esclusivamente a LocalSend
-    let zone = if !st.localsend.open {
+    let zone = if st.phone.is_none() {
         let tile = Rect::new(full.right() - PHONE_TILE_W, full.y, PHONE_TILE_W, full.h);
         if draw_phone_tile(ui, tile, 1.0 - g, card) {
-            actions.push(Action::LocalSendToggle);
+            actions.push(Action::PhoneOpen);
         }
         Rect::new(full.x, full.y, (full.w - PHONE_TILE_W - PILL_GAP).max(0.0), full.h)
     } else {
@@ -703,8 +677,8 @@ fn draw_phone_tile(ui: &mut Ui, tile: Rect, alpha: f32, card: Option<(Rect, f32)
     let c = tile.center();
     ui.c.fill_circle(Point::new(c.x, c.y - 24.0), 18.0, Color::white(0.10));
     ui.c.icon(Icon::Phone, Rect::from_center(Point::new(c.x, c.y - 24.0), 20.0, 20.0), palette::TEXT);
-    ui.c.text("LocalSend", Rect::new(tile.x, c.y + 2.0, tile.w, 20.0), &TextStyle::headline().center());
-    ui.c.text("Invia file al telefono via Wi-Fi", Rect::new(tile.x + 10.0, c.y + 22.0, tile.w - 20.0, 18.0), &TextStyle::footnote().color(palette::TEXT_DIM).center());
+    ui.c.text("Invia al telefono", Rect::new(tile.x, c.y + 2.0, tile.w, 20.0), &TextStyle::headline().center());
+    ui.c.text("File, link e appunti via Wi-Fi", Rect::new(tile.x + 10.0, c.y + 22.0, tile.w - 20.0, 18.0), &TextStyle::footnote().color(palette::TEXT_DIM).center());
     ui.c.set_alpha(base);
     resp.clicked
 }
@@ -895,18 +869,23 @@ fn draw_phone(ui: &mut Ui, st: &AppState, l: &mut Local, pd: &PhoneDrop, r: Rect
             }
         },
     }
-    // One pill per meaning: pair the first phone, or see the paired ones
-    // (that list has its own Pair a phone).
-    let (pair_label, pair_icon, pair_cmd) = if st.paired.is_empty() { ("Pair a phone", Some(Icon::Phone), PairCmd::Begin) } else { ("Paired phones", None, PairCmd::List) };
-    let n = if PAIRING { 2 } else { 1 };
+    let clip_anim = now < pd.clip_sent_until;
+    if clip_anim {
+        ui.request_anim();
+    }
+    let (clip_label, clip_icon, clip_style) = if clip_anim {
+        ("Inviato!", Some(Icon::Check), PillStyle::Primary(palette::GREEN))
+    } else {
+        ("Invia appunti", Some(Icon::Copy), PillStyle::Primary(st.accent))
+    };
     let host = link_host(&pd.url);
     if !host.is_empty() {
-        let cw = caption_w(ui, &[("Done", false), (pair_label, pair_icon.is_some())][..n]);
-        ui.c.text(&format!("This session's link · {host}"), Rect::new(x, pills_y + 7.0, cw, 16.0), &small);
+        let cw = caption_w(ui, &[("Chiudi", false), (clip_label, true)]);
+        ui.c.text(&format!("Wi-Fi locale · {host}"), Rect::new(x, pills_y + 7.0, cw, 16.0), &small);
     }
-    match pills(ui, &[("Done", None, PillStyle::Utility, "shelf.phone.done"), (pair_label, pair_icon, PillStyle::Utility, "shelf.pair.open")][..n]) {
+    match pills(ui, &[("Chiudi", None, PillStyle::Utility, "shelf.phone.done"), (clip_label, clip_icon, clip_style, "shelf.phone.clip")]) {
         Some(0) => actions.push(Action::PhoneClose),
-        Some(1) => actions.push(Action::Pair(pair_cmd)),
+        Some(1) => actions.push(Action::PhoneSendClip),
         _ => {}
     }
 }
@@ -1026,81 +1005,4 @@ fn qr_image(l: &mut Local, qr: &QrMatrix, url: &str, box_px: u32, module_px: u32
     let img = ImageData::new(box_px, box_px, px);
     l.qr_img = Some((url.to_string(), box_px, module_px, img.clone()));
     img
-}
-
-fn draw_localsend_panel(ui: &mut Ui, st: &AppState, items: &[ShelfItem], r: Rect, card: Option<(Rect, f32)>, actions: &mut Vec<Action>) {
-    drop_zone(ui, card, r, PHONE_R, Color::white(0.03), Color::white(0.12));
-    let x = r.x + 16.0;
-    let w = (r.w - 32.0).max(0.0);
-    let pills_y = r.bottom() - 14.0 - PILL_SMALL;
-
-    let title = if st.localsend.sending {
-        "Trasferimento LocalSend in corso..."
-    } else if st.localsend.scanning {
-        "Ricerca dispositivi LocalSend sulla rete..."
-    } else {
-        "Dispositivi LocalSend rilevati"
-    };
-    ui.c.text(title, Rect::new(x, r.y + 14.0, w - 160.0, 20.0), &TextStyle::headline());
-
-    let close_w = ui.pill_width("Chiudi", false, true);
-    let close_r = Rect::new(r.right() - 16.0 - close_w, r.y + 12.0, close_w, PILL_SMALL);
-    if ui.pill(wid("shelf.ls.close"), close_r, "Chiudi", None, PillStyle::Utility).clicked {
-        actions.push(Action::LocalSendToggle);
-    }
-    if !st.localsend.scanning && !st.localsend.sending {
-        let ref_w = ui.pill_width("Cerca", true, true);
-        let ref_r = Rect::new(close_r.x - PILL_GAP - ref_w, close_r.y, ref_w, PILL_SMALL);
-        if ui.pill(wid("shelf.ls.refresh"), ref_r, "Cerca", Some(Icon::Reset), PillStyle::Utility).clicked {
-            actions.push(Action::LocalSendRefresh);
-        }
-    }
-
-    let dim = TextStyle::footnote().color(palette::TEXT_DIM);
-
-    if let Some(status) = &st.localsend.status {
-        ui.c.text(status, Rect::new(x, r.y + 46.0, w, 20.0), &TextStyle::body().color(palette::ORANGE));
-        return;
-    }
-
-    if st.localsend.devices.is_empty() {
-        let hint = if st.localsend.scanning {
-            "Assicurati che l'app LocalSend sia aperta sul telefono (stesso Wi-Fi)."
-        } else {
-            "Nessun telefono trovato. Apri LocalSend sul telefono e premi Cerca."
-        };
-        ui.c.text(hint, Rect::new(x, r.y + 48.0, w, 20.0), &dim);
-        return;
-    }
-
-    let mut dy = r.y + 44.0;
-    for (i, dev) in st.localsend.devices.iter().take(2).enumerate() {
-        let row = Rect::new(x, dy, w, 34.0);
-        ui.c.fill_rrect(row, 10.0, Color::white(0.05));
-        ui.c.icon(Icon::Phone, Rect::new(row.x + 10.0, row.center().y - 8.0, 16.0, 16.0), st.accent);
-        let sub = if dev.device_model.is_empty() {
-            format!("{}", dev.ip)
-        } else {
-            format!("{} · {}", dev.device_model, dev.ip)
-        };
-        ui.c.text(&dev.alias, Rect::new(row.x + 32.0, row.y + 3.0, row.w - 140.0, 16.0), &TextStyle::body().weight(Weight::Semibold));
-        ui.c.text(&sub, Rect::new(row.x + 32.0, row.y + 18.0, row.w - 140.0, 14.0), &TextStyle::caption().color(palette::TEXT_FAINT));
-
-        let can_send = !items.is_empty() && !st.localsend.sending;
-        let send_lbl = if items.is_empty() { "Trascina file" } else { "Invia ora" };
-        let sw = ui.pill_width(send_lbl, false, true);
-        let sr = Rect::new(row.right() - 8.0 - sw, row.center().y - PILL_SMALL / 2.0, sw, PILL_SMALL);
-        let style = if can_send { PillStyle::Primary(st.accent) } else { PillStyle::Utility };
-        if ui.pill(wid_n("shelf.ls.send", i as u64), sr, send_lbl, None, style).clicked && can_send {
-            actions.push(Action::LocalSendSend(dev.clone()));
-        }
-        dy += 38.0;
-    }
-
-    let foot = if items.is_empty() {
-        "Trascina uno o più file nella Shelf qui sopra, poi premi Invia ora."
-    } else {
-        "Pronto a inviare tutti i file presenti nella Shelf al telefono selezionato."
-    };
-    ui.c.text(foot, Rect::new(x, pills_y + 8.0, w, 16.0), &TextStyle::caption().color(palette::TEXT_FAINT));
 }

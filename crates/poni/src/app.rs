@@ -5139,6 +5139,18 @@ impl App {
         match c {
             PhoneCmd::Open => self.open_phone(),
             PhoneCmd::Close => self.close_phone(),
+            PhoneCmd::SendClipboard => {
+                if let Some(text) = services::clipboard::read_text(self.hwnd).filter(|t| !t.trim().is_empty()) {
+                    if let Some(svc) = &self.phone {
+                        svc.set_clipboard(text);
+                        if let Some(pd) = self.st.phone.as_mut() {
+                            pd.clip_sent_until = self.st.now + 1.8;
+                        }
+                    }
+                } else {
+                    self.st.notify(Icon::Copy, palette::ORANGE, "Appunti vuoti", "Copia prima un testo o un link", 3.0, None);
+                }
+            }
             PhoneCmd::Answer { id, accept } => {
                 if let Some(svc) = &self.phone {
                     svc.answer(id, accept);

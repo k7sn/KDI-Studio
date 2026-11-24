@@ -32,6 +32,8 @@ pub enum PhoneCmd {
     Close,
     /// Answer the phone's question.
     Answer { id: u64, accept: bool },
+    /// Invia il testo/link dagli appunti del PC alla pagina del telefono.
+    SendClipboard,
 }
 
 /// Paired phones (also in the Shelf's phone panel; `services::pairdrop`).

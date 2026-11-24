@@ -130,6 +130,8 @@ struct State {
     transfers: HashMap<u64, Transfer>,
     offer: Vec<PathBuf>,
     offer_gen: u64,
+    clipboard: String,
+    clipboard_gen: u64,
 }
 
 struct Shared {
@@ -199,6 +201,13 @@ impl Server {
             st.offer = paths;
             st.offer_gen += 1;
         }
+    }
+
+    /// Testo o link dagli appunti del PC da mostrare subito sulla pagina del telefono.
+    pub fn set_clipboard(&self, text: String) {
+        let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.clipboard = text;
+        st.clipboard_gen += 1;
     }
 
     /// Seconds since the last request from any phone.
@@ -300,10 +309,11 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
     let r = match (head.method.as_str(), &segs[1..]) {
         ("GET", []) => serve_page(shared, &mut stream, &from),
         ("GET", ["info"]) => serve_info(shared, &mut stream),
+        ("GET", ["clip"]) => serve_clip(shared, &mut stream),
         ("POST", ["ask"]) => serve_ask(shared, &mut stream, &head, rest, &from),
         ("PUT", ["up", id, n]) => serve_upload(shared, &mut stream, &head, rest, id, n),
         ("GET", ["get", generation, n]) => serve_download(shared, &mut stream, generation, n),
-        (_, [] | ["info"] | ["ask"] | ["up", _, _] | ["get", _, _]) => http::respond_status(&mut stream, 405),
+        (_, [] | ["info"] | ["clip"] | ["ask"] | ["up", _, _] | ["get", _, _]) => http::respond_status(&mut stream, 405),
         _ => http::respond_status(&mut stream, 404),
     };
     if r.is_ok() {
@@ -358,6 +368,14 @@ fn serve_info(shared: &Shared, w: &mut TcpStream) -> io::Result<()> {
     };
     let files: Vec<_> = files.into_iter().map(|(i, _, name, size)| json!({ "n": i, "name": name, "size": size })).collect();
     http::respond_json(w, 200, &json!({ "name": shared.cfg.pc_name, "generation": generation, "files": files }))
+}
+
+fn serve_clip(shared: &Shared, w: &mut TcpStream) -> io::Result<()> {
+    let (gen, text) = {
+        let st = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        (st.clipboard_gen, st.clipboard.clone())
+    };
+    http::respond_json(w, 200, &json!({ "gen": gen, "text": text }))
 }
 
 #[derive(Deserialize)]

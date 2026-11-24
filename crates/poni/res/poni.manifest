@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity type="win32" name="Jatevo.Poni" version="0.2.30.0" processorArchitecture="*"/>
-  <description>KDI Studio - Kitsune Dynamic Island for Windows</description>
+  <description>KDIStudios - Kitsune Dynamic Island for Windows</description>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>

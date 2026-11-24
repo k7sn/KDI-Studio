@@ -69,6 +69,10 @@ impl PhoneDrop {
         self.server.set_offer(paths);
     }
 
+    pub fn set_clipboard(&self, text: String) {
+        self.server.set_clipboard(text);
+    }
+
     /// Seconds since a phone last asked for anything.
     pub fn idle_secs(&self) -> f64 {
         self.server.idle_secs()

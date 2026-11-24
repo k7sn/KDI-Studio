@@ -330,5 +330,69 @@ li.file:first-child { border-top: 0; }
   }, 4000);
 })();
 </script>
+
+<!-- KDIStudios Clipboard Widget -->
+<div id="kdi-clip" style="display:none;margin:12px auto;max-width:520px;padding:14px 16px;border-radius:16px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);font-family:system-ui,-apple-system,sans-serif;color:#fff;box-sizing:border-box;">
+  <div style="font-size:12px;opacity:.65;margin-bottom:6px;font-weight:600;">APPUNTI DAL PC</div>
+  <div id="kdi-clip-text" style="font-size:14px;word-break:break-word;white-space:pre-wrap;margin-bottom:12px;max-height:140px;overflow:auto;"></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button id="kdi-clip-copy" style="padding:8px 14px;border-radius:999px;border:0;background:#3478f6;color:#fff;font-weight:600;font-size:13px;cursor:pointer;">Copia</button>
+    <a id="kdi-clip-open" target="_blank" rel="noopener" style="display:none;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,0.16);color:#fff;font-weight:600;font-size:13px;text-decoration:none;">Apri link</a>
+  </div>
+</div>
+<script>
+(function(){
+  let lastGen = 0;
+  let curText = "";
+  const box = document.getElementById("kdi-clip");
+  const txtEl = document.getElementById("kdi-clip-text");
+  const copyBtn = document.getElementById("kdi-clip-copy");
+  const openBtn = document.getElementById("kdi-clip-open");
+  if (!box) return;
+  document.body.insertBefore(box, document.body.firstChild);
+
+  copyBtn.addEventListener("click", function() {
+    const done = () => {
+      copyBtn.textContent = "Copiato!";
+      copyBtn.style.background = "#22c55e";
+      setTimeout(() => { copyBtn.textContent = "Copia"; copyBtn.style.background = "#3478f6"; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(curText).then(done).catch(fallback);
+    } else { fallback(); }
+    function fallback() {
+      const ta = document.createElement("textarea");
+      ta.value = curText;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); done(); } catch(e) {}
+      document.body.removeChild(ta);
+    }
+  });
+
+  async function pollClip() {
+    try {
+      const r = await fetch("clip", { cache: "no-store" });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.gen && d.gen !== lastGen && d.text) {
+        lastGen = d.gen;
+        curText = d.text;
+        txtEl.textContent = curText;
+        box.style.display = "block";
+        const trimmed = curText.trim();
+        if (/^https?:\/\/\S+$/i.test(trimmed)) {
+          openBtn.href = trimmed;
+          openBtn.style.display = "inline-block";
+        } else {
+          openBtn.style.display = "none";
+        }
+      }
+    } catch(e) {}
+  }
+  pollClip();
+  setInterval(pollClip, 2000);
+})();
+</script>
 </body>
 </html>
