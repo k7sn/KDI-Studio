@@ -20,8 +20,8 @@ use windows::core::{implement, Interface, Result, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, E_FAIL};
 use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl};
 use windows::Win32::Media::Audio::{
-    eConsole, eMultimedia, eRender, EDataFlow, ERole, IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
-    IMMNotificationClient, IMMNotificationClient_Impl, ISimpleAudioVolume, MMDeviceEnumerator, AUDCLNT_E_DEVICE_INVALIDATED,
+    eConsole, eMultimedia, eRender, AudioSessionStateActive, EDataFlow, ERole, IAudioSessionControl2, IAudioSessionManager2, IMMDevice,
+    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, ISimpleAudioVolume, MMDeviceEnumerator, AUDCLNT_E_DEVICE_INVALIDATED,
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE,
 };
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
@@ -401,6 +401,7 @@ fn matches_app_id(exe_lower: &str, app_id: &str) -> bool {
 
 fn for_app_sessions(device: &IMMDevice, app_id: &str, mut f: impl FnMut(&ISimpleAudioVolume)) -> bool {
     let mut matched = false;
+    let mut active_vols: Vec<ISimpleAudioVolume> = Vec::new();
     unsafe {
         let Ok(mgr) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { return false };
         let Ok(enumerator) = mgr.GetSessionEnumerator() else { return false };
@@ -409,15 +410,31 @@ fn for_app_sessions(device: &IMMDevice, app_id: &str, mut f: impl FnMut(&ISimple
             let Ok(ctrl) = enumerator.GetSession(i) else { continue };
             let Ok(ctrl2) = ctrl.cast::<IAudioSessionControl2>() else { continue };
             let Ok(pid) = ctrl2.GetProcessId() else { continue };
-            if let Some(exe) = process_exe_name(pid) {
-                if matches_app_id(&exe, app_id) {
-                    if let Ok(vol) = ctrl.cast::<ISimpleAudioVolume>() {
+            if pid == 0 {
+                continue;
+            }
+            let is_active = ctrl.GetState().map(|s| s == AudioSessionStateActive).unwrap_or(false);
+            if let Ok(vol) = ctrl.cast::<ISimpleAudioVolume>() {
+                if let Some(exe) = process_exe_name(pid) {
+                    if matches_app_id(&exe, app_id) {
                         f(&vol);
                         matched = true;
+                        continue;
                     }
+                }
+                if is_active {
+                    active_vols.push(vol);
                 }
             }
         }
+    }
+    // Se l'app_id (es. PWA YouTube Music / browser) non coincide col nome .exe,
+    // controlla dinamicamente tutte le sessioni audio attualmente in riproduzione!
+    if !matched && !active_vols.is_empty() {
+        for vol in &active_vols {
+            f(vol);
+        }
+        matched = true;
     }
     matched
 }

@@ -171,7 +171,15 @@ pub fn discover_async(sink: EventSink) {
 
         let mut list: Vec<_> = found.lock().map(|m| m.values().cloned().collect()).unwrap_or_default();
         list.sort_by(|a, b| a.alias.cmp(&b.alias));
-        sink.send(AppEvent::LocalSend(LocalSendEvent::DevicesUpdated(list)));
+        if list.is_empty() {
+            let sub_str: Vec<String> = seen_sub.iter().map(|p| format!("{}.{}.{}.x", p[0], p[1], p[2])).collect();
+            sink.send(AppEvent::LocalSend(LocalSendEvent::Error(format!(
+                "Nessun dispositivo trovato su {} (porta 53317).",
+                sub_str.join(", ")
+            ))));
+        } else {
+            sink.send(AppEvent::LocalSend(LocalSendEvent::DevicesUpdated(list)));
+        }
     });
 }
 

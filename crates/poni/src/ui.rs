@@ -36,16 +36,19 @@ pub enum MouseButton {
 pub enum KeyInput {
     Char(char),
     Backspace,
+    BackspaceWord,
     Delete,
+    DeleteWord,
     Enter,
     Escape,
     Left,
+    WordLeft,
     Right,
+    WordRight,
     Up,
     Down,
     Home,
     End,
-    /// Ctrl+V (paste from clipboard; the app supplies the text as chars).
     SelectAll,
 }
 
@@ -88,6 +91,8 @@ pub struct Input {
     pub focused: Option<WidgetId>,
     /// Caret position (chars) inside the focused field.
     pub caret: usize,
+    /// True when all text in the focused field is selected (Ctrl+A).
+    pub select_all: bool,
 }
 
 impl Input {
@@ -375,10 +380,13 @@ impl<'a, 'g> Ui<'a, 'g> {
     fn text_input_styled(&mut self, id: WidgetId, r: Rect, buf: &mut String, placeholder: &str, max_chars: usize, look: InputLook) -> TextInputResp {
         let resp = self.interact(id, r, CursorKind::Text);
         let mut out = TextInputResp::default();
-        if resp.clicked && self.input.focused != Some(id) {
-            self.input.focused = Some(id);
-            self.input.caret = buf.chars().count();
-            self.wants_focus = Some(true);
+        if resp.clicked {
+            self.input.select_all = false;
+            if self.input.focused != Some(id) {
+                self.input.focused = Some(id);
+                self.input.caret = buf.chars().count();
+                self.wants_focus = Some(true);
+            }
         }
         let focused = self.input.focused == Some(id);
         out.focused = focused;
@@ -386,30 +394,133 @@ impl<'a, 'g> Ui<'a, 'g> {
             let keys = std::mem::take(&mut self.input.keys);
             let mut chars: Vec<char> = buf.chars().collect();
             let mut caret = self.input.caret.min(chars.len());
+            let mut sel = self.input.select_all;
+            let mut nav = false;
             for k in keys {
                 match k {
+                    KeyInput::SelectAll => {
+                        sel = !chars.is_empty();
+                        caret = chars.len();
+                        nav = true;
+                    }
                     KeyInput::Char(c) if !c.is_control() => {
+                        if sel {
+                            chars.clear();
+                            caret = 0;
+                            sel = false;
+                        }
                         if chars.len() < max_chars {
                             chars.insert(caret, c);
                             caret += 1;
                             out.changed = true;
                         }
                     }
-                    KeyInput::Backspace if caret > 0 => {
-                        caret -= 1;
-                        chars.remove(caret);
-                        out.changed = true;
+                    KeyInput::Backspace => {
+                        if sel {
+                            chars.clear();
+                            caret = 0;
+                            sel = false;
+                            out.changed = true;
+                        } else if caret > 0 {
+                            caret -= 1;
+                            chars.remove(caret);
+                            out.changed = true;
+                        }
                     }
-                    KeyInput::Delete if caret < chars.len() => {
-                        chars.remove(caret);
-                        out.changed = true;
+                    KeyInput::BackspaceWord => {
+                        if sel {
+                            chars.clear();
+                            caret = 0;
+                            sel = false;
+                            out.changed = true;
+                        } else if caret > 0 {
+                            let end = caret;
+                            while caret > 0 && chars[caret - 1].is_whitespace() {
+                                caret -= 1;
+                            }
+                            while caret > 0 && !chars[caret - 1].is_whitespace() {
+                                caret -= 1;
+                            }
+                            chars.drain(caret..end);
+                            out.changed = true;
+                        }
                     }
-                    KeyInput::Left => caret = caret.saturating_sub(1),
-                    KeyInput::Right => caret = (caret + 1).min(chars.len()),
-                    KeyInput::Home => caret = 0,
-                    KeyInput::End | KeyInput::SelectAll => caret = chars.len(),
-                    KeyInput::Enter => out.submitted = true,
+                    KeyInput::Delete => {
+                        if sel {
+                            chars.clear();
+                            caret = 0;
+                            sel = false;
+                            out.changed = true;
+                        } else if caret < chars.len() {
+                            chars.remove(caret);
+                            out.changed = true;
+                        }
+                    }
+                    KeyInput::DeleteWord => {
+                        if sel {
+                            chars.clear();
+                            caret = 0;
+                            sel = false;
+                            out.changed = true;
+                        } else if caret < chars.len() {
+                            let start = caret;
+                            let mut end = caret;
+                            while end < chars.len() && chars[end].is_whitespace() {
+                                end += 1;
+                            }
+                            while end < chars.len() && !chars[end].is_whitespace() {
+                                end += 1;
+                            }
+                            chars.drain(start..end);
+                            out.changed = true;
+                        }
+                    }
+                    KeyInput::Left => {
+                        caret = caret.saturating_sub(1);
+                        sel = false;
+                        nav = true;
+                    }
+                    KeyInput::WordLeft => {
+                        while caret > 0 && chars[caret - 1].is_whitespace() {
+                            caret -= 1;
+                        }
+                        while caret > 0 && !chars[caret - 1].is_whitespace() {
+                            caret -= 1;
+                        }
+                        sel = false;
+                        nav = true;
+                    }
+                    KeyInput::Right => {
+                        caret = (caret + 1).min(chars.len());
+                        sel = false;
+                        nav = true;
+                    }
+                    KeyInput::WordRight => {
+                        while caret < chars.len() && !chars[caret].is_whitespace() {
+                            caret += 1;
+                        }
+                        while caret < chars.len() && chars[caret].is_whitespace() {
+                            caret += 1;
+                        }
+                        sel = false;
+                        nav = true;
+                    }
+                    KeyInput::Home => {
+                        caret = 0;
+                        sel = false;
+                        nav = true;
+                    }
+                    KeyInput::End => {
+                        caret = chars.len();
+                        sel = false;
+                        nav = true;
+                    }
+                    KeyInput::Enter => {
+                        sel = false;
+                        out.submitted = true;
+                    }
                     KeyInput::Escape => {
+                        sel = false;
                         out.cancelled = true;
                     }
                     _ => {}
@@ -417,11 +528,12 @@ impl<'a, 'g> Ui<'a, 'g> {
             }
             *buf = chars.into_iter().collect();
             self.input.caret = caret;
+            self.input.select_all = sel;
             if out.cancelled {
                 self.input.focused = None;
                 self.wants_focus = Some(false);
             }
-            if out.changed || out.submitted || out.cancelled {
+            if out.changed || out.submitted || out.cancelled || nav {
                 self.repaint = true;
             }
         }
@@ -453,6 +565,11 @@ impl<'a, 'g> Ui<'a, 'g> {
         if buf.is_empty() {
             self.c.text(placeholder, inner, &st.color(palette::TEXT_FAINT));
         } else {
+            if focused && self.input.select_all {
+                let (tw, _) = self.c.measure(buf, &st, inner.w);
+                let sel_r = Rect::new(inner.x - 2.0, r.center().y - 9.0, (tw + 4.0).min(inner.w + 2.0), 18.0);
+                self.c.fill_rrect(sel_r, 4.0, palette::BLUE.with_alpha(0.38));
+            }
             self.c.text(buf, inner, &st);
         }
         if focused {

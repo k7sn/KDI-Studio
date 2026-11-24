@@ -236,7 +236,7 @@ impl PageKind {
     /// Notifications, which goes off with its tab (it's offered only where
     /// the copy can read notifications). Oyenza stays; the add-ons' pages come
     /// and go with their switches, AI's with Studio Pro.
-    pub const HIDEABLE: [PageKind; 6] = [PageKind::Media, PageKind::Today, PageKind::Shelf, PageKind::Tasks, PageKind::Focus, PageKind::Notifications];
+    pub const HIDEABLE: [PageKind; 5] = [PageKind::Media, PageKind::Shelf, PageKind::Tasks, PageKind::Focus, PageKind::Notifications];
 
     pub fn hideable(self) -> bool {
         Self::HIDEABLE.contains(&self)
@@ -279,7 +279,7 @@ fn row(st: &AppState, open: Option<PageKind>) -> Vec<PageKind> {
     PageKind::ALL
         .into_iter()
         .filter(|&p| match p {
-            PageKind::Oyenza | PageKind::Health | PageKind::Ielts | PageKind::Prayer | PageKind::Stocks => false,
+            PageKind::Oyenza | PageKind::Health | PageKind::Ielts | PageKind::Prayer | PageKind::Stocks | PageKind::Today => false,
             PageKind::Gemini => true,
             PageKind::Notes => st.notes_on(),
             PageKind::Ai => st.ai_usage_on(),

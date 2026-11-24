@@ -770,6 +770,7 @@ pub struct GeminiState {
     pub scroll: f32,
     pub model_idx: usize,
     pub answer_at: f64,
+    pub copied_until: f64,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -1369,18 +1369,24 @@ impl App {
             }
             WM_KEYDOWN => {
                 if self.text_focus {
+                    let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
                     let k = match VIRTUAL_KEY(wp.0 as u16) {
+                        VK_BACK if ctrl => Some(KeyInput::BackspaceWord),
                         VK_BACK => Some(KeyInput::Backspace),
+                        VK_DELETE if ctrl => Some(KeyInput::DeleteWord),
                         VK_DELETE => Some(KeyInput::Delete),
                         VK_RETURN => Some(KeyInput::Enter),
                         VK_ESCAPE => Some(KeyInput::Escape),
+                        VK_LEFT if ctrl => Some(KeyInput::WordLeft),
                         VK_LEFT => Some(KeyInput::Left),
+                        VK_RIGHT if ctrl => Some(KeyInput::WordRight),
                         VK_RIGHT => Some(KeyInput::Right),
                         VK_UP => Some(KeyInput::Up),
                         VK_DOWN => Some(KeyInput::Down),
                         VK_HOME => Some(KeyInput::Home),
                         VK_END => Some(KeyInput::End),
-                        VK_V if unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0 => {
+                        VK_A if ctrl => Some(KeyInput::SelectAll),
+                        VK_V if ctrl => {
                             if let Some(text) = services::clipboard::read_text(self.hwnd) {
                                 for c in text.chars().filter(|c| !c.is_control()) {
                                     self.input.keys.push(KeyInput::Char(c));

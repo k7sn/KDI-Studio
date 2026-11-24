@@ -56,10 +56,20 @@ pub fn draw(ui: &mut Ui, st: &mut AppState, area: Rect) {
     }
 
     if st.gemini.answer.is_some() && !st.gemini.editing_key {
-        let cw = ui.pill_width("Copia", true, true);
+        let just_copied = st.now < st.gemini.copied_until;
+        if just_copied {
+            ui.request_anim();
+        }
+        let (lbl, ico, style) = if just_copied {
+            ("Copiato!", Icon::Check, PillStyle::Primary(palette::GREEN))
+        } else {
+            ("Copia", Icon::Copy, PillStyle::Utility)
+        };
+        let cw = ui.pill_width(lbl, true, true);
         let copy_btn = Rect::new(key_btn.x - PILL_GAP - cw, key_btn.y, cw, PILL_SMALL);
-        if ui.pill(wid("gemini.copy"), copy_btn, "Copia", Some(Icon::Copy), PillStyle::Utility).clicked {
+        if ui.pill(wid("gemini.copy"), copy_btn, lbl, Some(ico), style).clicked {
             if let Some(ans) = &st.gemini.answer {
+                st.gemini.copied_until = st.now + 1.8;
                 st.cmd(Command::Gemini(GeminiCmd::Copy(ans.clone())));
             }
         }
