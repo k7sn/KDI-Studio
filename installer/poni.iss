@@ -1,7 +1,7 @@
 ; KDIStudios Installer (Inno Setup)
 
 #ifndef AppVersion
-  #define AppVersion "0.2.30"
+  #define AppVersion "1.8.0"
 #endif
 #ifndef ExeSource
   #define ExeSource "..\target\release\poni.exe"
@@ -62,7 +62,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 ; Apre automaticamente la porta 53530 su Windows Firewall per "Invia al telefono"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""KDIStudios Phone Drop"""; Flags: runhidden waituntilterminated
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""KDIStudios Phone Drop"" dir=in action=allow protocol=TCP localport=53530"; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""KDIStudios Phone Drop"" dir=in action=allow program=""{app}\{#AppExe}"" profile=any"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#AppExe}"; Description: "Avvia {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

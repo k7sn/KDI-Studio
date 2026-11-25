@@ -86,7 +86,7 @@ const WTS_SESSION_LOCK_: usize = 7;
 const WTS_SESSION_UNLOCK_: usize = 8;
 
 /// Steps for copying the Apple Music token (README).
-const APPLE_MUSIC_HELP_URL: &str = "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
+const APPLE_MUSIC_HELP_URL: &str = "https://github.com/k7sn/KDI-Studio";
 /// Phone drop closes itself after this long without a request from a phone.
 const PHONE_IDLE_S: f64 = 600.0;
 
@@ -238,7 +238,7 @@ thread_local! {
     static REC_MISSED: RefCell<Vec<(poni_core::recorder::Message, isize)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// A message from Oyenza Studio Recorder (`poni_core::recorder`), read while
+/// A message from KDIStudios Recorder (`poni_core::recorder`), read while
 /// it waits in `SendMessageTimeout`: true tells it the island shows the
 /// recording (or its Record page), so it keeps its own bar and controls
 /// hidden; false, that it should show them.
@@ -649,7 +649,7 @@ impl App {
         island.set_floating(pill::on(st.settings.theme).then_some(pill::TOP_GAP));
         let clock = FrameClock::start(SendHwnd::new(hwnd), monitor.handle);
         let taskbar_created_msg = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
-        // Oyenza Studio Recorder installed: the Record tab can show (one registry read).
+        // KDIStudios Recorder installed: the Record tab can show (one registry read).
         st.recorder = selftest_dir.is_none() && services::recorder::installed();
         // The Downloader: not in the Microsoft Store build.
         st.downloader_offered = !crate::autostart::packaged();
@@ -3231,7 +3231,7 @@ impl App {
         self.set_script_hotkey(can_read && self.selftest.is_none());
     }
 
-    /// Oyenza Studio Recorder's word on its recording, or "show yourself"
+    /// KDIStudios Recorder's word on its recording, or "show yourself"
     /// (`recorder_message`). True when the island takes it: it shows the
     /// recording, or opened on its Record page.
     fn on_recorder_message(&mut self, m: poni_core::recorder::Message, sender: isize) -> bool {
