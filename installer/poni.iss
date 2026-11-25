@@ -51,7 +51,6 @@ Name: "autostart"; Description: "Avvia automaticamente con Windows"; GroupDescri
 
 [Files]
 Source: "{#ExeSource}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "KDIStudios Dynamic Island"
